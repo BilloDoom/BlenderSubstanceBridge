@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "substance_texture_hookup"
+version = "1.1.0"
+name = "Substance Texture Auto-Hookup"
+tagline = "Wire Substance Painter exports into Principled BSDF materials"
+maintainer = "BilloDoom"
+type = "add-on"
+
+website = "https://github.com/BilloDoom/BlenderSubstanceBridge"
+
+tags = ["Material", "Node", "Import-Export"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
