@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src" / "substance_texture_hookup"
 DIST = ROOT / "dist"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 ADDON = SRC / "__init__.py"
 MANIFEST = SRC / "blender_manifest.toml"

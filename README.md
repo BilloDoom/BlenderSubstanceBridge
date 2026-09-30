@@ -5,11 +5,11 @@ BaseColor / Metallic / Roughness / Normal into a Principled BSDF.
 
 ## Install
 
-**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.1.0.zip` from Explorer
+**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.2.0.zip` from Explorer
 onto the Blender window and confirm the install dialog.
 
 **Blender 3.3 – 4.1** — `Edit > Preferences > Add-ons > Install...` and pick
-`dist/substance_texture_hookup-1.1.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
+`dist/substance_texture_hookup-1.2.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
 then enable *Substance Texture Auto-Hookup*.
 
 The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
@@ -17,7 +17,8 @@ The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
 ## Usage
 
 1. **Select Substance Textures** — multi-select the exported files. Filenames are parsed as
-   `MaterialName_Suffix.ext`; the material part may contain underscores.
+   `MaterialName_Suffix.ext`; the material part may contain underscores. UDIM exports named
+   `MaterialName_Suffix.1001.ext`, `.1002.ext`, and so on are grouped into one tiled image.
 2. Each detected group shows a checkbox per map. **All maps are checked by default** —
    uncheck any you don't want wired.
 3. Pick a target material (`prop_search` dropdown), or `+` to create one named after the group.
@@ -30,6 +31,8 @@ Recognized suffixes (case-insensitive): `BaseColor`, `Base_Color`, `Albedo`, `Di
 ## Behavior notes
 
 - BaseColor is loaded as sRGB; Metallic, Roughness and Normal as Non-Color.
+- UDIM sets use Blender's `<UDIM>` path token and are loaded as tiled images. Selecting any
+  tile discovers the other matching four-digit tiles in the same directory.
 - Normal maps route through a Normal Map node with an adjustable strength. Setting
   *Space* to **DirectX** inserts a green-channel inversion chain.
 - **Replace Previous Nodes** (Options) removes nodes a previous run created for the same

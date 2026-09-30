@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Substance Texture Auto-Hookup",
     "author": "BilloDoom",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (3, 3, 0),
     "location": "View3D > Sidebar > Substance Hookup",
     "description": "Auto-connect Substance Painter BaseColor/Metallic/Roughness/Normal maps to materials",
@@ -86,6 +86,8 @@ _SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+UDIM_TOKEN = "<UDIM>"
+
 INTERPOLATION_ITEMS = [
     ('Linear', "Linear", "Smooth interpolation"),
     ('Closest', "Closest", "No interpolation, sharp pixels"),
@@ -99,8 +101,19 @@ NORMAL_SPACE_ITEMS = [
 ]
 
 
-def classify_filename(filename):
+def split_udim_filename(filename):
+    """Return the texture stem and an optional UDIM tile number."""
     name = os.path.splitext(filename)[0]
+    stem, separator, tile_text = name.rpartition(".")
+    if separator and len(tile_text) == 4 and tile_text.isdigit():
+        tile_number = int(tile_text)
+        if tile_number >= 1001:
+            return stem, tile_number
+    return name, None
+
+
+def classify_filename(filename):
+    name, _tile_number = split_udim_filename(filename)
     match = _SUFFIX_RE.match(name)
     if not match:
         return None
@@ -108,6 +121,57 @@ def classify_filename(filename):
     if map_kind is None:
         return None
     return match.group("base"), map_kind
+
+
+def udim_filepath(filepath):
+    """Replace a recognized .1001-style tile number with Blender's token."""
+    filename = os.path.basename(filepath)
+    _stem, tile_number = split_udim_filename(filename)
+    if tile_number is None:
+        return filepath
+
+    root, extension = os.path.splitext(filepath)
+    root = root.rsplit(".", 1)[0]
+    return "%s.%s%s" % (root, UDIM_TOKEN, extension)
+
+
+def is_udim_filepath(filepath):
+    return UDIM_TOKEN in os.path.basename(filepath)
+
+
+def find_udim_tiles(filepath):
+    """Find the on-disk tiles represented by a <UDIM> filepath."""
+    normalized = bpy.path.abspath(filepath)
+    directory = os.path.dirname(normalized)
+    filename = os.path.basename(normalized)
+    if UDIM_TOKEN not in filename:
+        return []
+
+    prefix, suffix = filename.split(UDIM_TOKEN, 1)
+    pattern = re.compile(
+        r"^%s(?P<tile>\d{4})%s$" % (re.escape(prefix), re.escape(suffix))
+    )
+
+    try:
+        filenames = os.listdir(directory)
+    except OSError:
+        return []
+
+    tiles = []
+    for candidate in filenames:
+        match = pattern.match(candidate)
+        if not match:
+            continue
+        tile_number = int(match.group("tile"))
+        if tile_number >= 1001:
+            tiles.append((tile_number, os.path.join(directory, candidate)))
+    return sorted(tiles)
+
+
+def texture_filepath_exists(filepath):
+    if is_udim_filepath(filepath):
+        return bool(find_udim_tiles(filepath))
+    return os.path.exists(bpy.path.abspath(filepath))
 
 
 def find_best_material_match(name):
@@ -252,9 +316,11 @@ class SH_OT_SelectTextures(Operator, ImportHelper):
                 skipped += 1
                 continue
             mat_name, map_kind = result
-            detected.setdefault(mat_name, {})[map_kind] = os.path.join(
-                self.directory, item.name
-            )
+            filepath = udim_filepath(os.path.join(self.directory, item.name))
+            maps = detected.setdefault(mat_name, {})
+            previous_filepath = maps.get(map_kind)
+            if previous_filepath is None or is_udim_filepath(filepath):
+                maps[map_kind] = filepath
 
         if not detected:
             self.report({'WARNING'}, "No BaseColor/Metallic/Roughness/Normal textures recognized.")
@@ -408,11 +474,62 @@ def remove_tagged_nodes(node_tree, group_name):
         node_tree.nodes.remove(node)
 
 
+def normalized_image_filepath(filepath):
+    return os.path.normcase(os.path.normpath(bpy.path.abspath(filepath)))
+
+
 def load_image(filepath):
     normalized = bpy.path.abspath(filepath)
+    normalized_key = normalized_image_filepath(filepath)
     for image in bpy.data.images:
-        if image.filepath and bpy.path.abspath(image.filepath) == normalized:
+        if (
+            image.filepath
+            and normalized_image_filepath(image.filepath) == normalized_key
+            and (not is_udim_filepath(filepath) or image.source == 'TILED')
+        ):
             return image
+
+    if is_udim_filepath(filepath):
+        tiles = find_udim_tiles(filepath)
+        if not tiles:
+            raise RuntimeError(
+                "No UDIM tiles found for '%s'." % os.path.basename(filepath)
+            )
+
+        first_tile = next(
+            (path for number, path in tiles if number == 1001), tiles[0][1]
+        )
+        existing_images = set(bpy.data.images)
+        result = bpy.ops.image.open(
+            filepath=first_tile,
+            directory=os.path.dirname(first_tile),
+            files=[{"name": os.path.basename(first_tile)}],
+            check_existing=False,
+            relative_path=False,
+            use_udim_detecting=True,
+        )
+        if 'FINISHED' not in result:
+            raise RuntimeError(
+                "Blender could not load UDIM tiles for '%s'."
+                % os.path.basename(filepath)
+            )
+
+        for image in bpy.data.images:
+            if (
+                image.filepath
+                and normalized_image_filepath(image.filepath) == normalized_key
+                and image.source == 'TILED'
+            ):
+                return image
+
+        created = [image for image in bpy.data.images if image not in existing_images]
+        if len(created) == 1 and created[0].source == 'TILED':
+            return created[0]
+        raise RuntimeError(
+            "Blender did not create a tiled image for '%s'."
+            % os.path.basename(filepath)
+        )
+
     return bpy.data.images.load(normalized, check_existing=True)
 
 
@@ -455,7 +572,7 @@ def wire_group_to_material(group, material, replace_existing):
         if socket_name not in bsdf.inputs:
             continue
 
-        if not os.path.exists(bpy.path.abspath(entry.filepath)):
+        if not texture_filepath_exists(entry.filepath):
             missing.append(os.path.basename(entry.filepath))
             continue
 

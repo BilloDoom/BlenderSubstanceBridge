@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "substance_texture_hookup"
-version = "1.1.0"
+version = "1.2.0"
 name = "Substance Texture Auto-Hookup"
 tagline = "Wire Substance Painter exports into Principled BSDF materials"
 maintainer = "BilloDoom"
