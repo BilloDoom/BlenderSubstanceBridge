@@ -10,6 +10,8 @@ import bpy
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+TEST_TEMP_ROOT = ROOT / ".test_tmp"
+TEST_TEMP_ROOT.mkdir(exist_ok=True)
 
 import substance_texture_hookup as addon
 
@@ -32,7 +34,9 @@ assert addon.udim_filepath("/textures/Stone_BaseColor.1002.png").endswith(
     "/textures/Stone_BaseColor.<UDIM>.png"
 )
 
-with tempfile.TemporaryDirectory(prefix="substance_hookup_udim_test_") as directory:
+with tempfile.TemporaryDirectory(
+    prefix="substance_hookup_udim_test_", dir=TEST_TEMP_ROOT
+) as directory:
     for tile, color in ((1001, (1.0, 0.0, 0.0, 1.0)), (1002, (0.0, 1.0, 0.0, 1.0))):
         create_tile(
             os.path.join(directory, "Stone_BaseColor.%d.png" % tile),

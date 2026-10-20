@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Substance Texture Auto-Hookup",
     "author": "BilloDoom",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (3, 3, 0),
     "location": "View3D > Sidebar > Substance Hookup",
     "description": "Auto-connect Substance Painter BaseColor/Metallic/Roughness/Normal maps to materials",
@@ -203,6 +203,21 @@ class SH_MaterialGroup(PropertyGroup):
     group_name: StringProperty(name="Detected Name")
     textures: CollectionProperty(type=SH_TextureEntry)
     target_material: StringProperty(name="Target Material")
+    high_collection: PointerProperty(
+        name="High Poly Collection",
+        description="Collection exported as the high-poly FBX for this group",
+        type=bpy.types.Collection,
+    )
+    low_collection: PointerProperty(
+        name="Low Poly Collection",
+        description="Collection exported as the low-poly FBX for this group",
+        type=bpy.types.Collection,
+    )
+    export_directory: StringProperty(
+        name="Export Folder",
+        description="Folder for this group's HP and LP FBX files",
+        subtype='DIR_PATH',
+    )
     expanded: BoolProperty(default=True)
     interpolation: EnumProperty(
         name="Interpolation",
@@ -269,6 +284,11 @@ def snapshot_settings(settings):
             "normal_space": grp.normal_space,
             "normal_strength": grp.normal_strength,
             "expanded": grp.expanded,
+            "high_collection": (
+                grp.high_collection.name if grp.high_collection else ""
+            ),
+            "low_collection": grp.low_collection.name if grp.low_collection else "",
+            "export_directory": grp.export_directory,
             "enabled": {entry.map_kind: entry.enabled for entry in grp.textures},
         }
     return state
@@ -280,6 +300,9 @@ def restore_group(grp, state):
     grp.normal_space = state["normal_space"]
     grp.normal_strength = state["normal_strength"]
     grp.expanded = state["expanded"]
+    grp.high_collection = bpy.data.collections.get(state.get("high_collection", ""))
+    grp.low_collection = bpy.data.collections.get(state.get("low_collection", ""))
+    grp.export_directory = state.get("export_directory", "")
 
 
 class SH_OT_SelectTextures(Operator, ImportHelper):
@@ -334,6 +357,7 @@ class SH_OT_SelectTextures(Operator, ImportHelper):
             grp.group_name = mat_name
             grp.interpolation = settings.default_interpolation
             grp.normal_space = settings.default_normal_space
+            grp.export_directory = self.directory
 
             state = previous.get(mat_name)
             if state:
@@ -443,6 +467,118 @@ class SH_OT_ClearGroups(Operator):
 
     def execute(self, context):
         context.scene.sh_settings.groups.clear()
+        return {'FINISHED'}
+
+
+_INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_export_name(name):
+    """Make a group name safe to use as part of an FBX filename."""
+    cleaned = _INVALID_FILENAME_RE.sub("_", name).strip(" .")
+    return cleaned or "Substance"
+
+
+def collection_mesh_objects(collection):
+    """Return every mesh in a collection, including nested child collections."""
+    return [obj for obj in collection.all_objects if obj.type == 'MESH']
+
+
+def export_collection_fbx(context, collection, filepath):
+    """Export one collection without changing the user's current selection."""
+    mesh_objects = collection_mesh_objects(collection)
+    if not mesh_objects:
+        raise RuntimeError("Collection '%s' contains no mesh objects." % collection.name)
+
+    override = {
+        "selected_objects": mesh_objects,
+        "selected_editable_objects": mesh_objects,
+        "active_object": mesh_objects[0],
+        "object": mesh_objects[0],
+    }
+    with context.temp_override(**override):
+        result = bpy.ops.export_scene.fbx(
+            filepath=filepath,
+            check_existing=False,
+            use_selection=True,
+            object_types={'MESH'},
+            use_mesh_modifiers=True,
+            apply_unit_scale=True,
+            bake_anim=False,
+            add_leaf_bones=False,
+            axis_forward='-Z',
+            axis_up='Y',
+        )
+
+    if 'FINISHED' not in result:
+        raise RuntimeError("Blender could not export collection '%s'." % collection.name)
+
+
+class SH_OT_ExportCollection(Operator):
+    bl_idname = "sh.export_collection"
+    bl_label = "Export Collection FBX"
+    bl_description = "Export the selected HP or LP collection directly to FBX"
+    bl_options = {'REGISTER'}
+
+    group_index: IntProperty()
+    export_role: EnumProperty(
+        items=(
+            ('HP', "High Poly", "Export the high-poly collection"),
+            ('LP', "Low Poly", "Export the low-poly collection"),
+            ('BOTH', "Both", "Export both high- and low-poly collections"),
+        ),
+        default='LP',
+        options={'HIDDEN'},
+    )
+
+    def execute(self, context):
+        settings = context.scene.sh_settings
+        if not 0 <= self.group_index < len(settings.groups):
+            return {'CANCELLED'}
+
+        group = settings.groups[self.group_index]
+        roles = ('HP', 'LP') if self.export_role == 'BOTH' else (self.export_role,)
+        collections = {
+            'HP': group.high_collection,
+            'LP': group.low_collection,
+        }
+
+        for role in roles:
+            collection = collections[role]
+            if collection is None:
+                self.report({'WARNING'}, "%s collection is not assigned." % role)
+                return {'CANCELLED'}
+            if not collection_mesh_objects(collection):
+                self.report(
+                    {'WARNING'},
+                    "%s collection '%s' contains no meshes."
+                    % (role, collection.name),
+                )
+                return {'CANCELLED'}
+
+        if not group.export_directory.strip():
+            self.report({'WARNING'}, "Choose an export folder for this group.")
+            return {'CANCELLED'}
+
+        directory = bpy.path.abspath(group.export_directory)
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as exc:
+            self.report({'ERROR'}, "Could not create export folder: %s" % exc)
+            return {'CANCELLED'}
+
+        exported = []
+        base_name = safe_export_name(group.group_name)
+        for role in roles:
+            filepath = os.path.join(directory, "%s_%s.fbx" % (base_name, role))
+            try:
+                export_collection_fbx(context, collections[role], filepath)
+            except (RuntimeError, TypeError) as exc:
+                self.report({'ERROR'}, "%s export failed: %s" % (role, exc))
+                return {'CANCELLED'}
+            exported.append(os.path.basename(filepath))
+
+        self.report({'INFO'}, "Exported %s" % ", ".join(exported))
         return {'FINISHED'}
 
 
@@ -771,6 +907,35 @@ class SH_PT_MainPanel(Panel):
                 col.prop(grp, "normal_space", text="Space")
                 col.prop(grp, "normal_strength", text="Strength")
 
+            col.separator()
+            export_box = col.box()
+            export_box.label(text="Mesh Export", icon='EXPORT')
+            export_box.prop(grp, "export_directory", text="Folder")
+
+            row = export_box.row(align=True)
+            row.prop(grp, "high_collection", text="HP")
+            button = row.row(align=True)
+            button.enabled = grp.high_collection is not None
+            op = button.operator("sh.export_collection", text="Export")
+            op.group_index = index
+            op.export_role = 'HP'
+
+            row = export_box.row(align=True)
+            row.prop(grp, "low_collection", text="LP")
+            button = row.row(align=True)
+            button.enabled = grp.low_collection is not None
+            op = button.operator("sh.export_collection", text="Export")
+            op.group_index = index
+            op.export_role = 'LP'
+
+            row = export_box.row()
+            row.enabled = (
+                grp.high_collection is not None and grp.low_collection is not None
+            )
+            op = row.operator("sh.export_collection", text="Export HP + LP")
+            op.group_index = index
+            op.export_role = 'BOTH'
+
         layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.3
@@ -788,6 +953,7 @@ classes = (
     SH_OT_SetMaps,
     SH_OT_RemoveGroup,
     SH_OT_ClearGroups,
+    SH_OT_ExportCollection,
     SH_OT_ApplyHookup,
     SH_PT_MainPanel,
 )

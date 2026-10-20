@@ -5,11 +5,11 @@ BaseColor / Metallic / Roughness / Normal into a Principled BSDF.
 
 ## Install
 
-**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.2.0.zip` from Explorer
+**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.3.0.zip` from Explorer
 onto the Blender window and confirm the install dialog.
 
 **Blender 3.3 – 4.1** — `Edit > Preferences > Add-ons > Install...` and pick
-`dist/substance_texture_hookup-1.2.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
+`dist/substance_texture_hookup-1.3.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
 then enable *Substance Texture Auto-Hookup*.
 
 The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
@@ -22,7 +22,9 @@ The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
 2. Each detected group shows a checkbox per map. **All maps are checked by default** —
    uncheck any you don't want wired.
 3. Pick a target material (`prop_search` dropdown), or `+` to create one named after the group.
-4. **Apply**.
+4. Optionally choose HP and LP collections in the group's **Mesh Export** section. Choose an
+   export folder, then export either collection or both directly as FBX.
+5. **Apply**.
 
 Recognized suffixes (case-insensitive): `BaseColor`, `Base_Color`, `Albedo`, `Diffuse`, `Color`,
 `Metallic`, `Metalness`, `Metal`, `Roughness`, `Rough`, `Normal`, `NormalOpenGL`, `NormalDirectX`,
@@ -38,13 +40,16 @@ Recognized suffixes (case-insensitive): `BaseColor`, `Base_Color`, `Albedo`, `Di
 - **Replace Previous Nodes** (Options) removes nodes a previous run created for the same
   group before rewiring, so re-applying does not stack duplicates.
 - Missing files are reported and skipped rather than aborting the run.
+- Mesh exports include meshes in the selected collection and its child collections. Files are
+  written as `MaterialName_HP.fbx` and `MaterialName_LP.fbx`; repeated exports overwrite those
+  files so iteration does not require the FBX export dialog.
 
 ## Per-file memory
 
-All state — detected groups, per-map checkboxes, target materials, interpolation, normal
-settings, last browsed directory and the Options defaults — lives on `Scene.sh_settings`, so it
-is saved inside the `.blend` and restored on reopen. Re-running the file selector preserves the
-settings of any group whose name is detected again.
+All state — detected groups, per-map checkboxes, target materials, HP/LP collections, export
+folders, interpolation, normal settings, last browsed directory and the Options defaults — lives
+on `Scene.sh_settings`, so it is saved inside the `.blend` and restored on reopen. Re-running the
+file selector preserves the settings of any group whose name is detected again.
 
 ## Build
 
