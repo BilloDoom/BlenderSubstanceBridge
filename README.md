@@ -5,11 +5,11 @@ BaseColor / Metallic / Roughness / Normal into a Principled BSDF.
 
 ## Install
 
-**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.4.0.zip` from Explorer
+**Blender 4.2+ (drag & drop)** — drag `dist/substance_texture_hookup-1.5.0.zip` from Explorer
 onto the Blender window and confirm the install dialog.
 
 **Blender 3.3 – 4.1** — `Edit > Preferences > Add-ons > Install...` and pick
-`dist/substance_texture_hookup-1.4.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
+`dist/substance_texture_hookup-1.5.0-legacy.zip` (or `dist/substance_texture_hookup.py`),
 then enable *Substance Texture Auto-Hookup*.
 
 The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
@@ -23,10 +23,11 @@ The panel lives in `View3D > Sidebar (N) > Substance Hookup`.
    uncheck any you don't want wired.
    Use the `+` beside **Select Substance Textures** to add an empty group manually, then edit
    its name directly in the group header.
-3. Pick a target material (`prop_search` dropdown), or `+` to create one named after the group.
+3. Pick a target material (`prop_search` dropdown), or `+` to create one. Assigning a material
+   automatically changes the group name to the material name.
 4. Optionally choose HP and LP collections in the group's **Mesh Export** section, then export
-   either collection or both directly as FBX. When **Folder** is blank, exports go beside the
-   saved `.blend` file.
+   either collection or both directly. Set **Export File Extension** to `.fbx` or `.obj` in the
+   Options menu. When **Folder** is blank, exports go beside the saved `.blend` file.
 5. **Apply**.
 
 Recognized suffixes (case-insensitive): `BaseColor`, `Base_Color`, `Albedo`, `Diffuse`, `Color`,
@@ -44,8 +45,8 @@ Recognized suffixes (case-insensitive): `BaseColor`, `Base_Color`, `Albedo`, `Di
   group before rewiring, so re-applying does not stack duplicates.
 - Missing files are reported and skipped rather than aborting the run.
 - Mesh exports include meshes in the selected collection and its child collections. Files are
-  written as `MaterialName_HP.fbx` and `MaterialName_LP.fbx`; repeated exports overwrite those
-  files so iteration does not require the FBX export dialog.
+  written as `MaterialName_hp.fbx` and `MaterialName_lp.fbx` (or `.obj`); repeated exports
+  overwrite those files so iteration does not require the export dialog.
 - A blank export folder uses the saved `.blend` file's directory. An unsaved file must be saved
   or given an explicit export folder before exporting.
 

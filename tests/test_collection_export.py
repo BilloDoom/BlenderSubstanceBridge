@@ -40,6 +40,9 @@ try:
         "New Group",
         "New Group 2",
     ]
+    material = bpy.data.materials.new("Stone Material")
+    scene.sh_settings.groups[0].target_material = material.name
+    assert scene.sh_settings.groups[0].group_name == material.name
     assert addon.resolve_export_directory(scene.sh_settings.groups[0]) == ""
     scene.sh_settings.groups.clear()
 
@@ -75,8 +78,8 @@ try:
         result = bpy.ops.sh.export_collection(group_index=0, export_role='BOTH')
         assert result == {'FINISHED'}
 
-        high_path = os.path.join(directory, "Stone_HP.fbx")
-        low_path = os.path.join(directory, "Stone_LP.fbx")
+        high_path = os.path.join(directory, "Stone_hp.fbx")
+        low_path = os.path.join(directory, "Stone_lp.fbx")
         assert os.path.getsize(high_path) > 1000
         assert os.path.getsize(low_path) > 1000
         high_data = Path(high_path).read_bytes()
@@ -91,6 +94,15 @@ try:
         assert addon.collection_mesh_objects(low) == [low_object]
         assert list(bpy.context.selected_objects) == selected_before
         assert scene.view_layers[0].objects.active == unrelated
+
+        scene.sh_settings.export_extension = 'OBJ'
+        result = bpy.ops.sh.export_collection(group_index=0, export_role='HP')
+        assert result == {'FINISHED'}
+        obj_path = os.path.join(directory, "Stone_hp.obj")
+        obj_data = Path(obj_path).read_text(encoding="utf-8")
+        assert "HighObject" in obj_data
+        assert "LowObject" not in obj_data
+        assert "Unrelated" not in obj_data
 finally:
     addon.unregister()
 

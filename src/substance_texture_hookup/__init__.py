@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Substance Texture Auto-Hookup",
     "author": "BilloDoom",
-    "version": (1, 4, 0),
+    "version": (1, 5, 0),
     "blender": (3, 3, 0),
     "location": "View3D > Sidebar > Substance Hookup",
     "description": "Auto-connect Substance Painter BaseColor/Metallic/Roughness/Normal maps to materials",
@@ -100,6 +100,11 @@ NORMAL_SPACE_ITEMS = [
     ('DIRECTX', "DirectX", "Flip the green channel to convert DirectX (Y-) to OpenGL"),
 ]
 
+EXPORT_EXTENSION_ITEMS = [
+    ('FBX', ".fbx", "Export Autodesk FBX files"),
+    ('OBJ', ".obj", "Export Wavefront OBJ files"),
+]
+
 
 def split_udim_filename(filename):
     """Return the texture stem and an optional UDIM tile number."""
@@ -191,6 +196,12 @@ def find_best_material_match(name):
     return None
 
 
+def update_group_name_from_material(group, _context):
+    material = bpy.data.materials.get(group.target_material)
+    if material is not None:
+        group.group_name = material.name
+
+
 class SH_TextureEntry(PropertyGroup):
     map_kind: StringProperty()
     filepath: StringProperty(subtype='FILE_PATH')
@@ -204,7 +215,10 @@ class SH_TextureEntry(PropertyGroup):
 class SH_MaterialGroup(PropertyGroup):
     group_name: StringProperty(name="Detected Name")
     textures: CollectionProperty(type=SH_TextureEntry)
-    target_material: StringProperty(name="Target Material")
+    target_material: StringProperty(
+        name="Target Material",
+        update=update_group_name_from_material,
+    )
     high_collection: PointerProperty(
         name="High Poly Collection",
         description="Collection exported as the high-poly FBX for this group",
@@ -263,6 +277,12 @@ class SH_Settings(PropertyGroup):
         description="Normal space assigned to newly detected groups",
         items=NORMAL_SPACE_ITEMS,
         default='OPENGL',
+    )
+    export_extension: EnumProperty(
+        name="Export File Extension",
+        description="Mesh file format used by the HP and LP export buttons",
+        items=EXPORT_EXTENSION_ITEMS,
+        default='FBX',
     )
     auto_match_materials: BoolProperty(
         name="Auto Match Materials",
@@ -523,7 +543,7 @@ def resolve_export_directory(group):
     return ""
 
 
-def export_collection_fbx(context, collection, filepath):
+def export_collection_mesh(context, collection, filepath, export_extension):
     """Export one collection without changing the user's current selection."""
     mesh_objects = collection_mesh_objects(collection)
     if not mesh_objects:
@@ -536,27 +556,79 @@ def export_collection_fbx(context, collection, filepath):
         "object": mesh_objects[0],
     }
     with context.temp_override(**override):
-        result = bpy.ops.export_scene.fbx(
-            filepath=filepath,
-            check_existing=False,
-            use_selection=True,
-            object_types={'MESH'},
-            use_mesh_modifiers=True,
-            apply_unit_scale=True,
-            bake_anim=False,
-            add_leaf_bones=False,
-            axis_forward='-Z',
-            axis_up='Y',
-        )
+        if export_extension == 'FBX':
+            result = bpy.ops.export_scene.fbx(
+                filepath=filepath,
+                check_existing=False,
+                use_selection=True,
+                object_types={'MESH'},
+                use_mesh_modifiers=True,
+                apply_unit_scale=True,
+                bake_anim=False,
+                add_leaf_bones=False,
+                axis_forward='-Z',
+                axis_up='Y',
+            )
+        elif export_extension == 'OBJ':
+            if hasattr(bpy.ops.wm, "obj_export"):
+                properties = {
+                    prop.identifier
+                    for prop in bpy.ops.wm.obj_export.get_rna_type().properties
+                }
+                if "collection" in properties:
+                    result = bpy.ops.wm.obj_export(
+                        filepath=filepath,
+                        check_existing=False,
+                        collection=collection.name,
+                        export_selected_objects=False,
+                        apply_modifiers=True,
+                        export_eval_mode='DAG_EVAL_RENDER',
+                        export_materials=False,
+                    )
+                elif hasattr(bpy.ops.export_scene, "obj"):
+                    result = bpy.ops.export_scene.obj(
+                        filepath=filepath,
+                        check_existing=False,
+                        use_selection=True,
+                        use_apply_modifiers=True,
+                        use_materials=False,
+                        axis_forward='-Z',
+                        axis_up='Y',
+                    )
+                else:
+                    result = bpy.ops.wm.obj_export(
+                        filepath=filepath,
+                        check_existing=False,
+                        export_selected_objects=True,
+                        apply_modifiers=True,
+                        export_materials=False,
+                    )
+            elif hasattr(bpy.ops.export_scene, "obj"):
+                result = bpy.ops.export_scene.obj(
+                    filepath=filepath,
+                    check_existing=False,
+                    use_selection=True,
+                    use_apply_modifiers=True,
+                    use_materials=False,
+                    axis_forward='-Z',
+                    axis_up='Y',
+                )
+            else:
+                raise RuntimeError("The OBJ exporter is not available in this Blender build.")
+        else:
+            raise RuntimeError("Unsupported export extension: %s" % export_extension)
 
     if 'FINISHED' not in result:
-        raise RuntimeError("Blender could not export collection '%s'." % collection.name)
+        raise RuntimeError(
+            "Blender could not export collection '%s' as .%s."
+            % (collection.name, export_extension.lower())
+        )
 
 
 class SH_OT_ExportCollection(Operator):
     bl_idname = "sh.export_collection"
-    bl_label = "Export Collection FBX"
-    bl_description = "Export the selected HP or LP collection directly to FBX"
+    bl_label = "Export Collection"
+    bl_description = "Export the selected HP or LP collection in the configured format"
     bl_options = {'REGISTER'}
 
     group_index: IntProperty()
@@ -611,11 +683,20 @@ class SH_OT_ExportCollection(Operator):
 
         exported = []
         base_name = safe_export_name(group.group_name)
+        extension = settings.export_extension.lower()
         for role in roles:
-            filepath = os.path.join(directory, "%s_%s.fbx" % (base_name, role))
+            filepath = os.path.join(
+                directory,
+                "%s_%s.%s" % (base_name, role.lower(), extension),
+            )
             try:
-                export_collection_fbx(context, collections[role], filepath)
-            except (RuntimeError, TypeError) as exc:
+                export_collection_mesh(
+                    context,
+                    collections[role],
+                    filepath,
+                    settings.export_extension,
+                )
+            except (AttributeError, RuntimeError, TypeError) as exc:
                 self.report({'ERROR'}, "%s export failed: %s" % (role, exc))
                 return {'CANCELLED'}
             exported.append(os.path.basename(filepath))
@@ -889,6 +970,7 @@ class SH_PT_MainPanel(Panel):
             col = box.column(align=True)
             col.prop(settings, "default_interpolation")
             col.prop(settings, "default_normal_space")
+            col.prop(settings, "export_extension")
             col.prop(settings, "auto_match_materials")
             col.prop(settings, "replace_existing")
 
