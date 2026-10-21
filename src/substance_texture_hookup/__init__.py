@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Substance Texture Auto-Hookup",
     "author": "BilloDoom",
-    "version": (1, 3, 0),
+    "version": (1, 4, 0),
     "blender": (3, 3, 0),
     "location": "View3D > Sidebar > Substance Hookup",
     "description": "Auto-connect Substance Painter BaseColor/Metallic/Roughness/Normal maps to materials",
@@ -175,6 +175,8 @@ def texture_filepath_exists(filepath):
 
 
 def find_best_material_match(name):
+    if not name.strip():
+        return None
     name_lower = name.lower()
     exact = bpy.data.materials.get(name)
     if exact:
@@ -470,6 +472,34 @@ class SH_OT_ClearGroups(Operator):
         return {'FINISHED'}
 
 
+def unique_group_name(settings, base_name="New Group"):
+    existing = {group.group_name for group in settings.groups}
+    if base_name not in existing:
+        return base_name
+
+    number = 2
+    while "%s %d" % (base_name, number) in existing:
+        number += 1
+    return "%s %d" % (base_name, number)
+
+
+class SH_OT_AddGroup(Operator):
+    bl_idname = "sh.add_group"
+    bl_label = "Add Empty Group"
+    bl_description = "Add an empty editable group for material hookup and HP/LP export"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        settings = context.scene.sh_settings
+        group = settings.groups.add()
+        group.group_name = unique_group_name(settings)
+        group.interpolation = settings.default_interpolation
+        group.normal_space = settings.default_normal_space
+        group.expanded = True
+        settings.active_index = len(settings.groups) - 1
+        return {'FINISHED'}
+
+
 _INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -482,6 +512,15 @@ def safe_export_name(name):
 def collection_mesh_objects(collection):
     """Return every mesh in a collection, including nested child collections."""
     return [obj for obj in collection.all_objects if obj.type == 'MESH']
+
+
+def resolve_export_directory(group):
+    """Use the configured folder, or the saved blend file's folder when blank."""
+    if group.export_directory.strip():
+        return bpy.path.abspath(group.export_directory)
+    if bpy.data.filepath:
+        return os.path.dirname(bpy.path.abspath(bpy.data.filepath))
+    return ""
 
 
 def export_collection_fbx(context, collection, filepath):
@@ -556,11 +595,14 @@ class SH_OT_ExportCollection(Operator):
                 )
                 return {'CANCELLED'}
 
-        if not group.export_directory.strip():
-            self.report({'WARNING'}, "Choose an export folder for this group.")
+        directory = resolve_export_directory(group)
+        if not directory:
+            self.report(
+                {'WARNING'},
+                "Save the blend file or choose an export folder for this group.",
+            )
             return {'CANCELLED'}
 
-        directory = bpy.path.abspath(group.export_directory)
         try:
             os.makedirs(directory, exist_ok=True)
         except OSError as exc:
@@ -831,7 +873,9 @@ class SH_PT_MainPanel(Panel):
         layout = self.layout
         settings = context.scene.sh_settings
 
-        layout.operator("sh.select_textures", icon='FILEBROWSER')
+        row = layout.row(align=True)
+        row.operator("sh.select_textures", icon='FILEBROWSER')
+        row.operator("sh.add_group", text="", icon='ADD')
 
         header = layout.row()
         header.prop(
@@ -849,7 +893,7 @@ class SH_PT_MainPanel(Panel):
             col.prop(settings, "replace_existing")
 
         if not len(settings.groups):
-            layout.label(text="No textures selected yet.", icon='INFO')
+            layout.label(text="Select textures or press + to add a group.", icon='INFO')
             return
 
         layout.separator()
@@ -875,7 +919,13 @@ class SH_PT_MainPanel(Panel):
                 icon='TRIA_DOWN' if grp.expanded else 'TRIA_RIGHT',
                 emboss=False,
             )
-            head.label(text=grp.group_name, icon='MATERIAL')
+            head.prop(
+                grp,
+                "group_name",
+                text="",
+                icon='MATERIAL',
+                emboss=False,
+            )
             head.operator("sh.remove_group", text="", icon='X').group_index = index
 
             if not grp.expanded:
@@ -911,6 +961,15 @@ class SH_PT_MainPanel(Panel):
             export_box = col.box()
             export_box.label(text="Mesh Export", icon='EXPORT')
             export_box.prop(grp, "export_directory", text="Folder")
+            if not grp.export_directory.strip():
+                if bpy.data.filepath:
+                    export_box.label(
+                        text="Using saved .blend folder", icon='FILE_BLEND'
+                    )
+                else:
+                    export_box.label(
+                        text="Save .blend or choose folder", icon='ERROR'
+                    )
 
             row = export_box.row(align=True)
             row.prop(grp, "high_collection", text="HP")
@@ -953,6 +1012,7 @@ classes = (
     SH_OT_SetMaps,
     SH_OT_RemoveGroup,
     SH_OT_ClearGroups,
+    SH_OT_AddGroup,
     SH_OT_ExportCollection,
     SH_OT_ApplyHookup,
     SH_PT_MainPanel,

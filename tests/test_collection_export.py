@@ -33,6 +33,16 @@ assert addon.safe_export_name('Stone:Wall/Panel') == "Stone_Wall_Panel"
 addon.register()
 try:
     scene = bpy.context.scene
+    assert bpy.data.filepath == ""
+    assert bpy.ops.sh.add_group() == {'FINISHED'}
+    assert bpy.ops.sh.add_group() == {'FINISHED'}
+    assert [group.group_name for group in scene.sh_settings.groups] == [
+        "New Group",
+        "New Group 2",
+    ]
+    assert addon.resolve_export_directory(scene.sh_settings.groups[0]) == ""
+    scene.sh_settings.groups.clear()
+
     high = bpy.data.collections.new("Stone High")
     high_child = bpy.data.collections.new("Stone High Detail")
     low = bpy.data.collections.new("Stone Low")
@@ -51,11 +61,16 @@ try:
     with tempfile.TemporaryDirectory(
         prefix="substance_hookup_export_test_", dir=TEST_TEMP_ROOT
     ) as directory:
+        blend_path = os.path.join(directory, "collection_export_test.blend")
+        bpy.context.preferences.filepaths.file_preview_type = 'NONE'
+        bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+
         group = scene.sh_settings.groups.add()
         group.group_name = "Stone"
         group.high_collection = high
         group.low_collection = low
-        group.export_directory = directory
+        group.export_directory = ""
+        assert addon.resolve_export_directory(group) == directory
 
         result = bpy.ops.sh.export_collection(group_index=0, export_role='BOTH')
         assert result == {'FINISHED'}
